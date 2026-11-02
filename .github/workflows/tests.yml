@@ -1,0 +1,52 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pytest:
+    name: py${{ matrix.python }} / ${{ matrix.solver }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.14"]
+        # The suite runs its solver-dependent checks once per installed
+        # backend: SuperLU always, PARDISO only when pypardiso is present.
+        solver: [superlu, pardiso]
+    env:
+      # Keep BLAS/MKL from oversubscribing the runner's few cores.
+      OMP_NUM_THREADS: "2"
+      MKL_NUM_THREADS: "2"
+      OPENBLAS_NUM_THREADS: "1"
+      MPLBACKEND: Agg
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt threadpoolctl
+          if [ "${{ matrix.solver }}" = "pardiso" ]; then
+            python -m pip install pypardiso
+          fi
+
+      - name: Report sparse backend
+        run: python -c "from chladni_topopt.linalg import pardiso_available; print('PARDISO available:', pardiso_available())"
+
+      - name: Run tests
+        run: python -m pytest -q --durations=10

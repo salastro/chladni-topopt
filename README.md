@@ -1,5 +1,7 @@
 # Chladni-pattern topology optimization
 
+[![tests](https://github.com/salastro/chladni-topopt/actions/workflows/tests.yml/badge.svg)](https://github.com/salastro/chladni-topopt/actions/workflows/tests.yml)
+
 A Python reimplementation of
 
 > L. Xue, G. Wen, F. Wang, N. L. Pedersen, *Topology optimization design of
