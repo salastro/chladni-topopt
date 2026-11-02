@@ -31,9 +31,18 @@ from .filters import (
 )
 from .formulations import ConstraintFormulation, MultiObjectiveFormulation
 from .indicators import Average, Variance
+from .levelset import (
+    ContourReinitializer,
+    LevelSetConfig,
+    LevelSetUpdate,
+    NodalToElement,
+    WangHeaviside,
+    build_levelset_problem,
+)
 from .material import SIMPTwoMaterial, SolidVoidErsatz
 from .mesh import StructuredQuadMesh
 from .optimizers.adamw import AdamW
+from .optimizers.hamilton_jacobi import HamiltonJacobi
 from .optimizers.mma import MMA
 from .selection import SelectionVectors, build_selection_vectors, widths_in_elements
 from .sensitivity import AdjointEigenvectorSensitivity
@@ -41,13 +50,15 @@ from .tracking import FixedIndexTracker, MACTracker
 
 __all__ = [
     "AdamW", "AdjointEigenvectorSensitivity", "Assembler", "Average", "BetaContinuation",
-    "ChladniAnalysis", "ClampedEdges", "ConstraintFormulation",
+    "ChladniAnalysis", "ClampedEdges", "ConstraintFormulation", "ContourReinitializer",
     "CornerClamps", "DensityFilter", "DofSet", "EigenSolution", "ExponentialThreshold",
-    "FilterConfig", "FixedIndexTracker", "History", "IdentityFilter", "MACTracker", "MMA", "MaterialConfig",
+    "FilterConfig", "FixedIndexTracker", "HamiltonJacobi", "History", "IdentityFilter",
+    "LevelSetConfig", "LevelSetUpdate", "MACTracker", "MMA", "MaterialConfig",
     "MeshConfig", "MindlinQ4", "ModalState", "MultiObjectiveFormulation",
-    "NoContinuation", "OptimizationResult", "OptimizerConfig",
+    "NoContinuation", "NodalToElement", "OptimizationResult", "OptimizerConfig",
     "ProblemConfig", "SIMPTwoMaterial", "SelectionVectors", "ShiftInvertEigen",
     "SimplySupportedEdges", "SolidVoidErsatz", "StructuredQuadMesh", "TargetConfig",
-    "TopologyOptimizer", "Variance", "WindowedConvergence", "build_problem", "build_selection_vectors",
+    "TopologyOptimizer", "Variance", "WangHeaviside", "WindowedConvergence",
+    "build_levelset_problem", "build_problem", "build_selection_vectors",
     "widths_in_elements",
 ]

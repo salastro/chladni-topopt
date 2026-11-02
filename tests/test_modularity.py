@@ -30,8 +30,17 @@ from chladni_topopt.formulations import (
     Formulation,
     MultiObjectiveFormulation,
 )
+from chladni_topopt.levelset import (
+    ContourReinitializer,
+    LevelSetUpdate,
+    NodalToElement,
+    Reinitializer,
+    WangHeaviside,
+)
 from chladni_topopt.material import MaterialInterpolation, SIMPTwoMaterial, SolidVoidErsatz
 from chladni_topopt.mesh import StructuredQuadMesh
+from chladni_topopt.optimizers.hamilton_jacobi import HamiltonJacobi
+from chladni_topopt.regularizers import PerimeterTV, RegularizedFormulation
 from chladni_topopt.optimizers.base import Optimizer
 from chladni_topopt.optimizers.adamw import AdamW
 from chladni_topopt.optimizers.mma import MMA
@@ -53,8 +62,20 @@ from tests.conftest import make_analysis
         (SIMPTwoMaterial(1.0, 1.0, 1.0, 1.0), MaterialInterpolation),
         (MMA(n=3, m=1), Optimizer),
         (AdamW(n=3, m=1), Optimizer),
+        (WangHeaviside(width=0.04), Projection),
+        (NodalToElement(StructuredQuadMesh(1.0, 1.0, 2, 2)), Filter),
+        (SolidVoidErsatz(1.0, 1.0), MaterialInterpolation),
+        (HamiltonJacobi(grid=(3, 3), dx=0.5, dy=0.5, m=1), Optimizer),
+        (LevelSetUpdate(inner=AdamW(n=9, m=1), reinit=None), Optimizer),
+        (ContourReinitializer(StructuredQuadMesh(1.0, 1.0, 2, 2)), Reinitializer),
         (BetaContinuation(ExponentialThreshold()), Continuation),
         (NoContinuation(), Continuation),
+        (
+            RegularizedFormulation(
+                ConstraintFormulation(), PerimeterTV(StructuredQuadMesh(1.0, 1.0, 2, 2))
+            ),
+            Formulation,
+        ),
     ],
 )
 def test_shipped_implementations_satisfy_their_protocol(instance, protocol):
