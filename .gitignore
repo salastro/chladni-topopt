@@ -1,0 +1,15 @@
+# Environments and caches
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Run outputs: every result is reproducible from examples/.  A few curated
+# figures live in docs/figures/ instead.
+results/
+
+# Editors and OS
+.vscode/
+.idea/
+*.swp
+.DS_Store

@@ -1,0 +1,10 @@
+numpy>=1.24
+scipy>=1.10
+matplotlib>=3.7
+contourpy>=1.0      # nodal-line extraction (metrics, level-set reinitialisation)
+pytest>=7.0
+# Optional, and much faster: multithreaded PARDISO (Intel MKL) for the sparse
+# factorizations. Picked up automatically when installed; see README "Performance".
+# pypardiso>=0.4
+# Optional: keeps OpenBLAS single-threaded alongside MKL (see linalg.py).
+# threadpoolctl>=3.0
