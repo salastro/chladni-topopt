@@ -46,6 +46,8 @@ from chladni_topopt.config import (  # noqa: E402
     ProblemConfig,
     TargetConfig,
 )
+from chladni_topopt.domain import PlateInDomain  # noqa: E402
+from chladni_topopt.formulations import ConstraintFormulation  # noqa: E402
 from chladni_topopt.io import save_design, save_history  # noqa: E402
 from chladni_topopt.levelset import LevelSetConfig, build_levelset_problem  # noqa: E402
 from chladni_topopt.metrics import nodal_line_fit  # noqa: E402
@@ -71,21 +73,34 @@ LETTERS = {
 
 def build_config(args: argparse.Namespace) -> tuple[ProblemConfig, LevelSetConfig]:
     (lx, ly), loops, curves, mode, holes = LETTERS[args.shape]
+    domain = None
+    mesh = MeshConfig(
+        lx=lx, ly=ly, nx=round(lx / ELEMENT), ny=round(ly / ELEMENT), thickness=0.2
+    )
+    extra = {}
+    if args.domain_margin > 0.0:
+        # The plate sits inside a larger, void-filled domain so its outline
+        # can grow as well as shrink; targets and clamps move with it.
+        domain = PlateInDomain(plate=(lx, ly), margin=args.domain_margin, element=ELEMENT)
+        mesh = domain.mesh()
+        loops, curves = domain.shift(loops), domain.shift(curves)
+        extra["boundary"] = domain.clamps()
     config = ProblemConfig(
         targets=[
             TargetConfig(
-                loops=loops,
-                open_curves=curves,
+                loops=tuple(loops),
+                open_curves=tuple(curves),
                 mode_index=(args.mode or mode) - 1,
             )
         ],
-        mesh=MeshConfig(
-            lx=lx, ly=ly, nx=round(lx / ELEMENT), ny=round(ly / ELEMENT), thickness=0.2
-        ),
+        mesh=mesh,
+        formulation=ConstraintFormulation(vstar=args.vstar),
         optimizer=OptimizerConfig(max_iterations=args.iterations),
         solver=args.solver,
+        **extra,
     )
     levelset = LevelSetConfig(
+        domain=domain,
         update=args.update,
         holes=tuple(args.holes or holes),
         protect_target=not args.no_protect,
@@ -118,6 +133,14 @@ def main() -> None:
         "--no-protect", action="store_true",
         help="let holes cross the target (by default its band and gap stay solid)",
     )
+    parser.add_argument(
+        "--domain-margin", type=float, default=0.3,
+        help="void margin round the plate, in metres, so the outline can grow (0: mesh = plate)",
+    )
+    parser.add_argument(
+        "--vstar", type=float, default=None,
+        help="cap on the solid fraction of the mesh (default: no cap)",
+    )
     parser.add_argument("--solver", choices=["auto", "superlu", "pardiso"], default="auto")
     parser.add_argument("--outdir", type=Path, default=None)
     parser.add_argument(
@@ -143,7 +166,11 @@ def main() -> None:
         f"initial holes\n"
         f"target corridor {'solid' if levelset.protect_target else 'unprotected'}, "
         f"perimeter weight {levelset.perimeter_weight}, "
-        f"outline {'moving' if levelset.live_edge else 'fixed'}\n"
+        + (
+            f"outline moving in a {levelset.domain.margin:g} m void margin\n"
+            if levelset.domain is not None
+            else f"outline {'moving inward' if levelset.live_edge else 'fixed'}\n"
+        )
     )
 
     outdir = args.outdir
@@ -200,11 +227,12 @@ def main() -> None:
         f"objective          {final.objective:.4f}\n"
         f"Avg(L, phi) ratio  {final.diagnostics['avg_shape_ratio']:.4f}  (limit {formulation.eps})\n"
         f"Var(L~, phi) ratio {final.diagnostics['var_surround_ratio']:.4f}  (limit {formulation.tau})\n"
-        f"solid fraction     {final.diagnostics['volume_fraction']:.4f}  (limit {formulation.vstar})\n"
+        f"solid fraction     {final.diagnostics['volume_fraction']:.4f}  "
+        f"({'no cap' if formulation.vstar is None else f'limit {formulation.vstar}'})\n"
         f"target frequency   {final.target_frequencies[0]:.2f} Hz  "
         f"(spectrum position {final.target_indices[0] + 1})\n"
         f"nodal line fit     {fit.summary()}  (holes masked)\n"
-        f"holes              {count_holes(problem.mesh, xbar)}"
+        f"holes              {count_holes(problem.mesh, xbar, exclude_border=levelset.domain is not None)}"
         + (
             f"  (perimeter {final.diagnostics['perimeter_ratio']:.3f} of the initial)\n"
             if "perimeter_ratio" in final.diagnostics

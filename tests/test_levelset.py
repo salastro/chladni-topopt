@@ -327,6 +327,56 @@ def test_live_edge_outline_moves_and_clamps_stay_solid():
     assert np.all(result.x[clamps] > 0.0)
 
 
+def _domain_problem(iterations=4, nx_scale=1):
+    from chladni_topopt.domain import PlateInDomain
+
+    domain = PlateInDomain(plate=(2.0, 2.4), margin=0.3, element=0.1 / nx_scale)
+    config = ProblemConfig(
+        targets=[TargetConfig(loops=tuple(domain.shift(letter_d(1.0, 1.2, 1.0, 1.2))), mode_index=4)],
+        mesh=domain.mesh(),
+        boundary=domain.clamps(),
+        formulation=ConstraintFormulation(vstar=None),
+        optimizer=OptimizerConfig(max_iterations=iterations),
+    )
+    levelset = LevelSetConfig(domain=domain, holes=(3, 4), width=0.2, step=0.05, step_min=0.01)
+    return build_levelset_problem(config, levelset, verbose=False), domain
+
+
+def test_domain_start_has_the_plate_outline_as_a_zero_contour():
+    problem, domain = _domain_problem()
+    phi = problem.x0
+    plate = domain.plate_sdf(problem.mesh.node_coords())
+    # Frozen nodes (the clamps' surroundings, the target corridor) are held solid.
+    free = ~np.isin(np.arange(len(phi)), problem.driver.optimizer.frozen)
+    assert np.all(phi[free & (plate < -0.05)] < 0.0)  # the margin is void
+    assert np.all(phi[free & (np.abs(plate) < 1e-9)] <= 1e-12)  # outline: Phi = 0
+
+
+def test_lengths_are_metres_not_elements():
+    """The same LevelSetConfig gives the same physical Heaviside width on two meshes."""
+    coarse, _ = _domain_problem(nx_scale=1)
+    fine, _ = _domain_problem(nx_scale=2)
+    assert coarse.analysis.projection.width == fine.analysis.projection.width == 0.2
+    cfl_coarse = coarse.driver.optimizer.inner.cfl * coarse.mesh.dx
+    cfl_fine = fine.driver.optimizer.inner.cfl * fine.mesh.dx
+    assert cfl_coarse == pytest.approx(cfl_fine)
+
+
+def test_outline_can_grow_into_the_margin():
+    """A constant outward speed moves the plate edge into the void margin."""
+    problem, domain = _domain_problem()
+    hj = problem.driver.optimizer.inner
+    phi = problem.x0
+    grow = -np.ones_like(phi)  # G = -1 everywhere: speed +1, material advances
+    moved = hj.update(phi, 0.0, grow, np.zeros(2), np.zeros((2, len(phi))))
+    plate = domain.plate_sdf(problem.mesh.node_coords())
+    free = ~np.isin(np.arange(len(phi)), problem.driver.optimizer.frozen)
+    margin = free & (plate < 0.0) & (plate > -0.1)
+    # Upwinding leaves local maxima alone, e.g. a one-node ridge between a
+    # starting hole and the margin, so "nearly all" rather than all.
+    assert np.mean(moved[margin] > phi[margin]) > 0.95
+
+
 # -- metric ---------------------------------------------------------------------
 
 

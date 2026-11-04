@@ -21,19 +21,24 @@ def perforated(
     mesh: StructuredQuadMesh,
     holes: tuple[int, int] = (6, 7),
     radius: float = 0.35,
+    box: tuple[float, float, float, float] | None = None,
 ) -> np.ndarray:
     """Signed distance to a regular array of circular holes; positive in material.
 
     ``holes`` is the number of holes along x and y, centred in equal cells.
     ``radius`` is a fraction of the smaller cell side, so the starting solid
     fraction is ``1 - pi radius^2 * (smaller/larger side)`` -- about 0.6 at the
-    default on a square cell, and independent of the mesh.
+    default on a square cell, and independent of the mesh.  ``box`` is
+    ``(x0, y0, width, height)`` of the region to perforate, by default the
+    whole mesh; a plate inside a larger domain is perforated on its own.
     """
     nhx, nhy = holes
-    cell_x, cell_y = mesh.lx / nhx, mesh.ly / nhy
+    x0, y0, lx, ly = box if box is not None else (0.0, 0.0, mesh.lx, mesh.ly)
+    cell_x, cell_y = lx / nhx, ly / nhy
     r = radius * min(cell_x, cell_y)
     cx, cy = np.meshgrid(
-        (np.arange(nhx) + 0.5) * cell_x, (np.arange(nhy) + 0.5) * cell_y, indexing="ij"
+        x0 + (np.arange(nhx) + 0.5) * cell_x, y0 + (np.arange(nhy) + 0.5) * cell_y,
+        indexing="ij",
     )
     centres = np.column_stack([cx.ravel(), cy.ravel()])
     dist, _ = cKDTree(centres).query(mesh.node_coords())

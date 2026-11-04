@@ -28,6 +28,7 @@ import numpy as np
 
 from ..analysis import ChladniAnalysis
 from ..config import Problem, ProblemConfig, build_common
+from ..domain import PlateInDomain
 from ..driver import TopologyOptimizer, WindowedConvergence
 from ..eigen import ShiftInvertEigen
 from ..filters import NoContinuation
@@ -46,17 +47,25 @@ from .update import LevelSetUpdate
 class LevelSetConfig:
     """Level-set parameterisation, update and initial design.
 
-    Lengths are in element widths, like the filter radius and zone widths of
-    the density method.  The plate material is ``ProblemConfig.material.e1``
-    and ``rho1``; the void is an ersatz fraction of it.  The volume cap is the
-    formulation's ``vstar``, now the fraction of the plate left solid.
+    Lengths are in metres, so a quick preview and a full-resolution run solve
+    the same physical problem (in element widths, halving the element halved
+    the Heaviside width and the step too).  The defaults are the values tuned
+    on the 0.04 m quick mesh.  The plate material is
+    ``ProblemConfig.material.e1`` and ``rho1``; the void is an ersatz fraction
+    of it.  The volume cap is the formulation's ``vstar``, the fraction of the
+    domain left solid; ``ConstraintFormulation(vstar=None)`` drops it.
+
+    With ``domain`` set, the mesh is that design domain and the plate starts
+    as the rectangle inside it, so its outline is a zero contour from the
+    first iteration and can move outward as well as inward.
     """
 
     #: ``"hj"``: Wang et al.'s upwind Hamilton-Jacobi step.  ``"adamw"``: AdamW
     #: on the nodal values of ``Phi``, a parametric level set.
     update: Literal["hj", "adamw"] = "hj"
-    #: Half-width of the smoothed Heaviside, Eq. (40).  Wang et al. use 2.
-    width_elements: float = 2.0
+    #: Half-width of the smoothed Heaviside, Eq. (40), in metres.  Wang et al.
+    #: use two elements; this is two quick-mesh elements.
+    width: float = 0.08
     e_void: float = 1e-3
     rho_void: float = 1e-5
     #: Initial perforation: holes along x and y, and their radius as a
@@ -68,21 +77,28 @@ class LevelSetConfig:
     protect_target: bool = True
     #: Weight of ``P / P0`` added to the objective; 0 turns the penalty off.
     perimeter_weight: float = 0.2
-    #: Make the plate outline a moving boundary, starting ``edge_margin``
-    #: elements inside the edge (see :func:`.initial.live_edge`).  Experimental.
+    #: The plate inside a larger design domain (see :mod:`chladni_topopt.domain`);
+    #: ``None`` means the mesh is the plate.
+    domain: PlateInDomain | None = None
+    #: Without a domain: make the plate outline a moving boundary, starting
+    #: ``edge_margin`` metres inside the edge (see :func:`.initial.live_edge`).
+    #: It can only move inward.
     live_edge: bool = False
-    edge_margin_elements: float = 0.5
+    edge_margin: float = 0.02
 
-    # Hamilton-Jacobi.
-    cfl: float = 0.2
-    cfl_decay: float = 0.996
-    cfl_min: float = 0.05
-    smooth_passes: int = 4
+    # Hamilton-Jacobi: boundary move per update, in metres, decaying
+    # geometrically to ``step_min``.
+    step: float = 0.008
+    step_decay: float = 0.996
+    step_min: float = 0.002
+    #: Length over which the speed is smoothed (Wang's non-local ``mu``); the
+    #: number of averaging passes scales with ``(smooth_length / h)^2``.
+    smooth_length: float = 0.057
 
-    # AdamW on Phi: step sizes and the bound on |Phi|, in element widths.
-    lr_elements: float = 0.5
-    lr_min_elements: float = 0.05
-    bound_elements: float = 6.0
+    # AdamW on Phi: step sizes and the bound on |Phi|, in metres.
+    lr: float = 0.02
+    lr_min: float = 0.002
+    bound: float = 0.24
 
 
 def build_levelset_problem(
@@ -92,7 +108,8 @@ def build_levelset_problem(
     iteration budget, convergence test and augmented-Lagrangian settings."""
     parts = build_common(config, verbose)
     mesh, unit = parts.mesh, parts.unit
-    width = levelset.width_elements * unit
+    width = levelset.width
+    h = min(mesh.dx, mesh.dy)
     opt = config.optimizer
     m = len(config.formulation.constraint_names)
     formulation = config.formulation
@@ -126,23 +143,23 @@ def build_levelset_problem(
             dx=mesh.dx,
             dy=mesh.dy,
             m=m,
-            cfl=levelset.cfl,
-            cfl_decay=levelset.cfl_decay,
-            cfl_min=levelset.cfl_min,
-            smooth_passes=levelset.smooth_passes,
+            cfl=levelset.step / h,
+            cfl_decay=levelset.step_decay,
+            cfl_min=levelset.step_min / h,
+            # n passes of 5-point averaging spread over about h * sqrt(n / 2).
+            smooth_passes=round(2.0 * (levelset.smooth_length / h) ** 2),
             rho=opt.rho,
             dual_interval=opt.dual_interval,
         )
     elif levelset.update == "adamw":
-        bound = levelset.bound_elements * unit
         inner = AdamW(
             n=mesh.n_node,
             m=m,
-            xmin=-bound,
-            xmax=bound,
-            lr=levelset.lr_elements * unit,
+            xmin=-levelset.bound,
+            xmax=levelset.bound,
+            lr=levelset.lr,
             lr_decay=opt.lr_decay,
-            lr_min=levelset.lr_min_elements * unit,
+            lr_min=levelset.lr_min,
             beta1=opt.beta1,
             beta2=opt.beta2,
             rho=opt.rho,
@@ -167,9 +184,17 @@ def build_levelset_problem(
         frozen_value=width,
         reinit_every=levelset.reinit_every,
     )
-    phi0 = perforated(mesh, levelset.holes, levelset.hole_radius)
-    if levelset.live_edge:
-        phi0 = live_edge(mesh, phi0, levelset.edge_margin_elements * unit)
+    if levelset.domain is not None:
+        domain = levelset.domain
+        phi0 = perforated(
+            mesh, levelset.holes, levelset.hole_radius,
+            box=(*domain.origin, *domain.plate),
+        )
+        phi0 = np.minimum(phi0, domain.plate_sdf(mesh.node_coords()))
+    else:
+        phi0 = perforated(mesh, levelset.holes, levelset.hole_radius)
+        if levelset.live_edge:
+            phi0 = live_edge(mesh, phi0, levelset.edge_margin)
     phi0 = update.freeze(phi0)
 
     driver = TopologyOptimizer(
