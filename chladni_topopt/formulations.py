@@ -64,23 +64,31 @@ class ConstraintFormulation:
     the nodal line appear there; ``g2`` keeps the surrounding amplitude
     uniform, which makes the pattern crisp; the objective pushes that
     surrounding amplitude up.
+
+    ``vstar=None`` drops ``g3``.  A material budget made sense for the paper's
+    two-material plate; for a single-material plate whose boundary is the
+    design, it only fights the pattern constraints.
     """
 
     eps: float = 0.01
     tau: float = 0.4
-    vstar: float = 0.55
+    vstar: float | None = 0.55
 
-    constraint_names: tuple[str, ...] = ("avg_shape", "var_surround", "volume")
+    @property
+    def constraint_names(self) -> tuple[str, ...]:
+        names = ("avg_shape", "var_surround")
+        return names if self.vstar is None else names + ("volume",)
 
     def responses(
         self, modes: Sequence[TargetMode], design: DesignState
     ) -> Responses:
         n_dof = len(modes[0].phi_full)
         n_modes = len(modes)
-        values = np.zeros(4)
-        dphi = np.zeros((4, n_modes, n_dof))
-        dlam = np.zeros((4, n_modes))
-        dxbar = np.zeros((4, len(design.xbar)))
+        n_resp = 1 + len(self.constraint_names)
+        values = np.zeros(n_resp)
+        dphi = np.zeros((n_resp, n_modes, n_dof))
+        dlam = np.zeros((n_resp, n_modes))
+        dxbar = np.zeros((n_resp, len(design.xbar)))
 
         obj = g_shape = g_var = 0.0
         for s, mode in enumerate(modes):
@@ -101,13 +109,11 @@ class ConstraintFormulation:
             dphi[1, s] = w / ref.avg_shape * AVERAGE.gradient(sel.shape, phi)
             dphi[2, s] = w / ref.var_surround * VARIANCE.gradient(sel.surround, phi)
 
-        vol, dvol = _volume_response(design, self.vstar)
-
         values[0] = obj
         values[1] = g_shape - self.eps
         values[2] = g_var - self.tau
-        values[3] = vol
-        dxbar[3] = dvol
+        if self.vstar is not None:
+            values[3], dxbar[3] = _volume_response(design, self.vstar)
 
         diagnostics = {
             "obj": obj,

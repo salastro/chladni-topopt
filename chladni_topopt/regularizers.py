@@ -73,15 +73,27 @@ class PerimeterTV:
         return value, grad
 
 
-def count_holes(mesh: StructuredQuadMesh, xbar: np.ndarray, threshold: float = 0.5) -> int:
+def count_holes(
+    mesh: StructuredQuadMesh,
+    xbar: np.ndarray,
+    threshold: float = 0.5,
+    exclude_border: bool = False,
+) -> int:
     """Connected void regions (``xbar < threshold``, edge-adjacent elements).
 
-    Notches that open onto the plate edge count as holes too.  For reporting
-    only: the count is what the perimeter penalty stands in for.
+    Notches that open onto the plate edge count as holes too.  When the plate
+    sits inside a larger domain, the void round it touches the mesh border:
+    ``exclude_border`` leaves such regions out, so only true holes count.
+    For reporting only: the count is what the perimeter penalty stands in for.
     """
     void = np.asarray(xbar).reshape(mesh.nx, mesh.ny) < threshold
-    _, n = ndimage.label(void)
-    return int(n)
+    labels, n = ndimage.label(void)
+    if not exclude_border:
+        return int(n)
+    border = np.unique(
+        np.concatenate([labels[0], labels[-1], labels[:, 0], labels[:, -1]])
+    )
+    return int(n - np.count_nonzero(border))
 
 
 @dataclass
