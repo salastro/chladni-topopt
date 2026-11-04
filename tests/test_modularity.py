@@ -41,6 +41,7 @@ from chladni_topopt.material import MaterialInterpolation, SIMPTwoMaterial, Soli
 from chladni_topopt.mesh import StructuredQuadMesh
 from chladni_topopt.optimizers.hamilton_jacobi import HamiltonJacobi
 from chladni_topopt.regularizers import PerimeterTV, RegularizedFormulation
+from chladni_topopt.spline import ClosedBSpline, SplineMap, rectangle_controls
 from chladni_topopt.optimizers.base import Optimizer
 from chladni_topopt.optimizers.adamw import AdamW
 from chladni_topopt.optimizers.mma import MMA
@@ -70,6 +71,13 @@ from tests.conftest import make_analysis
         (ContourReinitializer(StructuredQuadMesh(1.0, 1.0, 2, 2)), Reinitializer),
         (BetaContinuation(ExponentialThreshold()), Continuation),
         (NoContinuation(), Continuation),
+        (
+            SplineMap(
+                ClosedBSpline(8), *rectangle_controls(0.0, 0.0, 1.0, 1.0, 8),
+                t_lo=-0.1, t_hi=0.1, centroids=np.zeros((1, 2)), band=0.1,
+            ),
+            Filter,
+        ),
         (
             RegularizedFormulation(
                 ConstraintFormulation(), PerimeterTV(StructuredQuadMesh(1.0, 1.0, 2, 2))
