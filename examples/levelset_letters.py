@@ -47,7 +47,10 @@ from chladni_topopt.config import (  # noqa: E402
     TargetConfig,
 )
 from chladni_topopt.domain import PlateInDomain  # noqa: E402
-from chladni_topopt.formulations import ConstraintFormulation  # noqa: E402
+from chladni_topopt.formulations import (  # noqa: E402
+    ConstraintFormulation,
+    SignedPatternFormulation,
+)
 from chladni_topopt.io import save_design, save_history  # noqa: E402
 from chladni_topopt.levelset import LevelSetConfig, build_levelset_problem  # noqa: E402
 from chladni_topopt.metrics import nodal_line_fit  # noqa: E402
@@ -94,7 +97,11 @@ def build_config(args: argparse.Namespace) -> tuple[ProblemConfig, LevelSetConfi
             )
         ],
         mesh=mesh,
-        formulation=ConstraintFormulation(vstar=args.vstar),
+        formulation=(
+            SignedPatternFormulation(vstar=args.vstar)
+            if args.loss == "signed"
+            else ConstraintFormulation(vstar=args.vstar)
+        ),
         optimizer=OptimizerConfig(max_iterations=args.iterations),
         solver=args.solver,
         **extra,
@@ -138,6 +145,11 @@ def main() -> None:
         help="void margin round the plate, in metres, so the outline can grow (0: mesh = plate)",
     )
     parser.add_argument(
+        "--loss", choices=["signed", "paper"], default="signed",
+        help="signed: scale-free band ratio + sign agreement + zone-energy guard; "
+        "paper: Eq. (15) of Xue et al.",
+    )
+    parser.add_argument(
         "--vstar", type=float, default=None,
         help="cap on the solid fraction of the mesh (default: no cap)",
     )
@@ -162,7 +174,7 @@ def main() -> None:
         f"mesh {config.mesh.nx} x {config.mesh.ny} "
         f"({problem.mesh.n_elem} elements, {problem.dofs.n_free} free DOFs)\n"
         f"target: {args.shape.upper()} on mode {target.mode_index + 1}, "
-        f"level-set update {args.update}, {levelset.holes[0]} x {levelset.holes[1]} "
+        f"{args.loss} loss, level-set update {args.update}, {levelset.holes[0]} x {levelset.holes[1]} "
         f"initial holes\n"
         f"target corridor {'solid' if levelset.protect_target else 'unprotected'}, "
         f"perimeter weight {levelset.perimeter_weight}, "
@@ -225,9 +237,17 @@ def main() -> None:
     print(
         f"\nconverged={result.converged} after {result.iterations} iterations\n"
         f"objective          {final.objective:.4f}\n"
-        f"Avg(L, phi) ratio  {final.diagnostics['avg_shape_ratio']:.4f}  (limit {formulation.eps})\n"
-        f"Var(L~, phi) ratio {final.diagnostics['var_surround_ratio']:.4f}  (limit {formulation.tau})\n"
-        f"solid fraction     {final.diagnostics['volume_fraction']:.4f}  "
+        + "".join(
+            f"{name:18s} {value:+.4f}  (<= 0 is met)\n"
+            for name, value in zip(formulation.constraint_names, final.constraints)
+        )
+        + f"Avg(L, phi) ratio  {final.diagnostics['avg_shape_ratio']:.4f}  (the paper's indicator)\n"
+        + (
+            f"sign agreement     {final.diagnostics['sign_agreement']:.4f}\n"
+            f"zone energy        {final.diagnostics['zone_energy_ratio']:.4f} of the initial\n"
+            if "sign_agreement" in final.diagnostics else ""
+        )
+        + f"solid fraction     {final.diagnostics['volume_fraction']:.4f}  "
         f"({'no cap' if formulation.vstar is None else f'limit {formulation.vstar}'})\n"
         f"target frequency   {final.target_frequencies[0]:.2f} Hz  "
         f"(spectrum position {final.target_indices[0] + 1})\n"
